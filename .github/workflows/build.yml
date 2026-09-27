@@ -1,0 +1,80 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate icons
+        run: python3 tools/make_icons.py
+      - uses: flipperdevices/flipperzero-ufbt-action@v0.1.3
+        with:
+          task: lint
+
+  build:
+    name: Build (${{ matrix.sdk-channel }} SDK)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Official firmware channels. To support a custom firmware, add an
+        # entry with `sdk-index-url` pointing at its SDK index instead.
+        sdk-channel: [release, dev]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate icons
+        run: python3 tools/make_icons.py
+      - name: Build with ufbt
+        id: build-app
+        uses: flipperdevices/flipperzero-ufbt-action@v0.1.3
+        with:
+          sdk-channel: ${{ matrix.sdk-channel }}
+      - name: Name the build after its SDK
+        run: |
+          mkdir -p out
+          cp "${{ steps.build-app.outputs.fap-dir }}/digiflip.fap" \
+            "out/digiflip-${{ matrix.sdk-channel }}-${{ steps.build-app.outputs.suffix }}.fap"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digiflip-${{ matrix.sdk-channel }}
+          path: out/*.fap
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, lint, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches fap_version
+        run: |
+          version=$(sed -n 's/.*fap_version="\([^"]*\)".*/\1/p' application.fam)
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} doesn't match fap_version $version in application.fam" >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.fap
+          generate_release_notes: true

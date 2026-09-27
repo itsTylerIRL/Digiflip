@@ -1,0 +1,10 @@
+.ufbt/
+.vscode/
+build/
+dist/
+*.fap
+__pycache__/
+backups/
+assets/poses/preview.png
+images/
+digiflip_icon.png
